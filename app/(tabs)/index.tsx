@@ -1,98 +1,165 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { EventCard } from '@/components/events/event-card';
+import { FilterChips } from '@/components/events/filter-chips';
+import { SearchBar } from '@/components/events/search-bar';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { NormalizedEvent, searchEvents } from '@/services/api';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [keyword, setKeyword] = useState('');
+  const [city, setCity] = useState('');
+  const [classification, setClassification] = useState<string | null>(null);
+  const [events, setEvents] = useState<NormalizedEvent[]>([]);
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const scheme = useColorScheme() ?? 'light';
+  const c = Colors[scheme];
+
+  const fetchPage = useCallback(async (nextPage: number, replace = false) => {
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const mappedClass = classification === 'other' ? undefined : classification || undefined;
+      const res = await searchEvents({ keyword, city, classificationName: mappedClass, page: nextPage, size: 20 });
+      setTotalPages(res.totalPages);
+      setPage(res.page);
+      setEvents(prev => (replace ? res.events : [...prev, ...res.events]));
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load events');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [keyword, city, classification, loading]);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchPage(0, true), 300);
+    return () => clearTimeout(t);
+  }, [keyword, city, classification, fetchPage]);
+
+  const onEndReached = () => {
+    if (loading) return;
+    if (page + 1 >= totalPages) return;
+    fetchPage(page + 1);
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchPage(0, true);
+  };
+
+  return (
+    <View
+      // Plain view so no automatic top inset; hero gradient will sit flush
+      style={[styles.safe, { backgroundColor: c.background }]}
+    >
+      <LinearGradient colors={['#ec4899', '#9333ea']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <View style={styles.heroHeaderRow}>
+          <Text style={styles.heroTitle}>{`Discover Events`}</Text>
+        </View>
+        <Text style={styles.heroSubtitle}>{`Find and book tickets to concerts, sports, theater and more`}</Text>
+        <View style={styles.searchWrapper}>
+          <SearchBar value={keyword} onChange={setKeyword} placeholder="Search events by name or keyword" />
+        </View>
+        <FilterChips
+          value={classification}
+          onChange={setClassification}
+          options={[
+            { value: 'Music', label: 'Music' },
+            { value: 'Sports', label: 'Sports' },
+            { value: 'Arts & Theatre', label: 'Theatre' },
+            { value: 'other', label: 'Other' },
+          ]}
+        />
+        <Pressable
+          style={styles.clearSmall}
+          onPress={() => { setCity(''); setClassification(null); setKeyword(''); }}
+          hitSlop={8}
+        >
+          <Text style={styles.clearSmallText}>Clear Filters</Text>
+        </Pressable>
+      </LinearGradient>
+      <View style={styles.container}>
+        {error ? (
+          <View style={styles.center}>
+            <Text style={styles.error}>{error}</Text>
+            <Pressable onPress={() => fetchPage(0, true)} style={styles.retryBtn} hitSlop={6}>
+              <Text style={styles.retryText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <FlatList
+            data={events}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <EventCard event={item} />}
+            contentContainerStyle={{ paddingVertical: 16, paddingTop: 8 }}
+            onEndReached={onEndReached}
+            onEndReachedThreshold={0.4}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            ListFooterComponent={loading ? (
+              <View style={{ paddingVertical: 20 }}><ActivityIndicator /></View>
+            ) : null}
+            ListEmptyComponent={!loading ? (
+              <View style={styles.center}><Text style={styles.empty}>No events found</Text></View>
+            ) : null}
+          />
+        )}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  safe: { flex: 1 },
+  favNav: { fontSize: 20, color: '#9333ea' },
+  hero: {
+    paddingHorizontal:15,
+    paddingTop: 0,
+    paddingBottom: 15,
+    borderBottomLeftRadius: 36,
+    borderBottomRightRadius: 36,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  heroHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  heroTitle: {
+    fontSize: 30,
+    lineHeight: 30,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.5,
+    marginTop: 55,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  heroSubtitle: {
+    color: '#fde7ff',
+    fontSize: 15,
+    lineHeight: 20,
+    marginTop: 16,
+    marginBottom: 26,
+    fontWeight: '500',
   },
+  searchWrapper: { marginBottom: 14 },
+  cityWrapper: { marginBottom: 12 },
+  cityInput: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 14,
+    fontSize: 15,
+  },
+  clearSmall: { marginTop: 14, alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)' },
+  clearSmallText: { color: '#fff', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
+  container: { flex: 1, paddingHorizontal: 16 },
+  center: { alignItems: 'center', padding: 40 },
+  error: { color: '#dc2626', marginBottom: 12, textAlign: 'center' },
+  retryBtn: { backgroundColor: '#7e22ce', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, marginTop: 4 },
+  retryText: { color: '#fff', fontWeight: '600' },
+  empty: { color: '#64748b' },
 });
